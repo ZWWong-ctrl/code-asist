@@ -470,6 +470,15 @@ with tab_chat:
         answer = resp.text or ""
         st.markdown(answer)
 
+        with st.chat_message("assistant"):
+    with st.spinner("Thinking…"):
+        resp = client.models.generate_content(
+            model=model_name,
+            contents=prompt
+        )
+        answer = resp.text or ""
+        st.markdown(answer)
+
         if show_sources:
             with st.expander("Sources used (doc + page + snippet)"):
                 for rank, (idx, score) in enumerate(picked, start=1):
@@ -485,5 +494,7 @@ with tab_chat:
 """,
                         unsafe_allow_html=True,
                     )
+
+
 
 
