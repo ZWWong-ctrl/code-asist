@@ -461,4 +461,29 @@ with tab_chat:
                     answer = resp.text or ""
                     st.markdown(answer)
 
-                    if show_sources:
+                    with st.chat_message("assistant"):
+    with st.spinner("Thinking…"):
+        resp = client.models.generate_content(
+            model=model_name,
+            contents=prompt
+        )
+        answer = resp.text or ""
+        st.markdown(answer)
+
+        if show_sources:
+            with st.expander("Sources used (doc + page + snippet)"):
+                for rank, (idx, score) in enumerate(picked, start=1):
+                    c = st.session_state.chunks[idx]
+                    snippet = c.text[:500].replace("\n", " ")
+                    st.markdown(
+                        f"""
+<div class="source-box">
+  <div class="source-title">Source {rank} <span class="codechip">score {score:.3f}</span></div>
+  <div class="source-meta">📄 {c.doc_name} — page {c.page}</div>
+  <div class="small">{snippet}...</div>
+</div>
+""",
+                        unsafe_allow_html=True,
+                    )
+
+
