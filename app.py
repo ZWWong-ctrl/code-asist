@@ -461,39 +461,190 @@ with tab_chat:
                     answer = resp.text or ""
                     st.markdown(answer)
 
-                    with st.chat_message("assistant"):
-    with st.spinner("Thinking…"):
-        resp = client.models.generate_content(
-            model=model_name,
-            contents=prompt
-        )
-        answer = resp.text or ""
-        st.markdown(answer)
-
-        with st.chat_message("assistant"):
-    with st.spinner("Thinking…"):
-        resp = client.models.generate_content(
-            model=model_name,
-            contents=prompt
-        )
-        answer = resp.text or ""
-        st.markdown(answer)
-
-        if show_sources:
-            with st.expander("Sources used (doc + page + snippet)"):
-                for rank, (idx, score) in enumerate(picked, start=1):
-                    c = st.session_state.chunks[idx]
-                    snippet = c.text[:500].replace("\n", " ")
-                    st.markdown(
-                        f"""
+                    if show_sources:
+                        with st.expander("Sources used (doc + page + snippet)"):
+                            for rank, (idx, score) in enumerate(picked, start=1):
+                                c = st.session_state.chunks[idx]
+                                snippet = c.text[:500].replace("\n", " ")
+                                st.markdown(
+                                    f"""
 <div class="source-box">
   <div class="source-title">Source {rank} <span class="codechip">score {score:.3f}</span></div>
   <div class="source-meta">📄 {c.doc_name} — page {c.page}</div>
   <div class="small">{snippet}...</div>
 </div>
 """,
-                        unsafe_allow_html=True,
-                    )
+                                    unsafe_allow_html=True,
+                                )
+
+            st.session_state.messages.append({"role": "assistant", "content": answer})
+
+    with right:
+        st.markdown("### 📌 Status")
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.write(f"**Docs loaded:** {len(st.session_state.docs_loaded)}")
+        st.write(f"**Chunks indexed:** {len(st.session_state.chunks)}")
+        st.write(f"**Mode:** {mode}")
+        st.write(f"**Model:** {model_name}")
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        st.write("")
+        st.markdown("### 🧠 Example prompts")
+        st.markdown(
+            """
+- Explain DTFT vs DFT using my notes  
+- Give me hints to solve this problem (paste question)  
+- Make 10 flashcards about FIR window method  
+- Create 5 MCQ and answer key on root locus steps  
+- Check my working (I’ll paste it)  
+"""
+        )
+
+# =========================
+# SUMMARY TAB
+# =========================
+with tab_summary:
+    st.markdown("### 🧾 Summarize your notes")
+    st.caption("This summary will be based on retrieved chunks from your notes (not general web knowledge).")
+
+    if not st.session_state.chunks:
+        st.info("Upload PDFs in the sidebar first.")
+    else:
+        topic = st.text_input("Topic to summarize (example: 'DFT properties', 'Root locus steps')", value="")
+        level = st.selectbox("Detail level", ["Very short", "Short", "Medium", "Detailed"])
+        go = st.button("Generate summary")
+
+        if go:
+            query = topic.strip() or "Summarize the key points of the notes."
+            picked = retrieve_top_chunks(query, st.session_state.chunks, st.session_state.bm25_index, top_k=top_k, k1=k1, b=b)
+            notes_block = format_notes_block(st.session_state.chunks, picked)
+
+            prompt = (
+                f"{system_rules()}\n"
+                f"Task: Create a {level.lower()} summary.\n"
+                f"Output format:\n- Key ideas\n- Important formulas (if any)\n- Common mistakes\n- 3 self-check questions\n\n"
+                f"NOTES:\n\"\"\"\n{notes_block}\n\"\"\"\n\n"
+                f"TOPIC: {topic or 'General'}\n"
+            )
+
+            with st.spinner("Summarizing…"):
+                resp = client.models.generate_content(model=model_name, contents=prompt)
+                st.markdown(resp.text or "")
+
+# =========================
+# FLASHCARDS TAB
+# =========================
+with tab_flash:
+    st.markdown("### 🗂️ Flashcards")
+    st.caption("Generates flashcards from the most relevant pages in your notes.")
+
+    if not st.session_state.chunks:
+        st.info("Upload PDFs in the sidebar first.")
+    else:
+        topic = st.text_input("Flashcard topic (example: 'DTFT properties', 'IIR bilinear transform')", value="")
+        n = st.slider("Number of flashcards", 5, 25, 10)
+        go = st.button("Generate flashcards")
+
+        if go:
+            query = topic.strip() or "Important key points and definitions"
+            picked = retrieve_top_chunks(query, st.session_state.chunks, st.session_state.bm25_index, top_k=top_k, k1=k1, b=b)
+            notes_block = format_notes_block(st.session_state.chunks, picked)
+
+            prompt = (
+                f"{system_rules()}\n"
+                f"Task: Create {n} flashcards from the notes.\n"
+                "Format strictly:\n"
+                "1) Q: ...\n   A: ...\n"
+                "2) Q: ...\n   A: ...\n"
+                "Keep answers short.\n\n"
+                f"NOTES:\n\"\"\"\n{notes_block}\n\"\"\"\n\n"
+                f"TOPIC: {topic or 'General'}\n"
+            )
+
+            with st.spinner("Generating…"):
+                resp = client.models.generate_content(model=model_name, contents=prompt)
+                st.markdown(resp.text or "")
+
+# =========================
+# QUIZ TAB (JSON + scoring)
+# =========================
+with tab_quiz:
+    st.markdown("### 📝 Quiz (Auto-scoring)")
+    st.caption("Creates a 5-question MCQ quiz in JSON so the app can score your answers.")
+
+    if not st.session_state.chunks:
+        st.info("Upload PDFs in the sidebar first.")
+    else:
+        topic = st.text_input("Quiz topic (example: 'DFT vs DTFT', 'Root locus rules')", value="")
+        make_quiz = st.button("Create quiz")
+
+        if make_quiz:
+            query = topic.strip() or "Key concepts in the notes"
+            picked = retrieve_top_chunks(query, st.session_state.chunks, st.session_state.bm25_index, top_k=top_k, k1=k1, b=b)
+            notes_block = format_notes_block(st.session_state.chunks, picked)
+            prompt = build_quiz_json_prompt(notes_block, topic or "General")
+
+            with st.spinner("Creating quiz…"):
+                resp = client.models.generate_content(model=model_name, contents=prompt)
+                raw = (resp.text or "").strip()
+
+            # Try parse JSON
+            quiz_obj = None
+            try:
+                quiz_obj = json.loads(raw)
+            except Exception:
+                # Sometimes model wraps JSON in fences; try extracting JSON
+                m = re.search(r"\{.*\}", raw, flags=re.DOTALL)
+                if m:
+                    try:
+                        quiz_obj = json.loads(m.group(0))
+                    except Exception:
+                        quiz_obj = None
+
+            if not quiz_obj or "questions" not in quiz_obj:
+                st.error("Quiz JSON parse failed. Showing raw output so you can fix prompt/model.")
+                st.code(raw)
+            else:
+                st.session_state.quiz_obj = quiz_obj
+                st.success("Quiz created ✅")
+
+        if st.session_state.quiz_obj:
+            quiz = st.session_state.quiz_obj
+            st.markdown(f"#### {quiz.get('title','Quiz')}")
+            answers = []
+
+            for i, q in enumerate(quiz["questions"], start=1):
+                st.markdown(f"**Q{i}. {q['q']}**")
+                opts = q["options"]
+                choice = st.radio(
+                    label=f"Choose for Q{i}",
+                    options=["A", "B", "C", "D"],
+                    format_func=lambda x: f"{x}. {opts.get(x,'')}",
+                    key=f"q_{i}",
+                    horizontal=True,
+                )
+                answers.append(choice)
+
+                with st.expander("Sources"):
+                    for s in q.get("sources", []):
+                        st.write(f"- {s.get('doc','')} page {s.get('page','')}")
+
+                st.divider()
+
+            if st.button("Submit & score"):
+                correct = 0
+                for i, q in enumerate(quiz["questions"]):
+                    if answers[i] == q["answer"]:
+                        correct += 1
+
+                st.markdown(f"### Score: **{correct} / {len(quiz['questions'])}**")
+
+                for i, q in enumerate(quiz["questions"], start=1):
+                    st.markdown(f"**Q{i} answer:** {q['answer']}  |  **Your:** {answers[i-1]}")
+                    st.markdown(f"**Explanation:** {q.get('explain','')}")
+                    st.write("")
+
+
 
 
 
